@@ -37,6 +37,14 @@ Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
 # merged for 1.11.0: https://github.com/rust-lang/rust/pull/33787
 Patch1:         rust-pr33787-enable-local-rebuild.patch
 
+# merged for 1.11.0: https://github.com/rust-lang/rust/pull/33798
+Patch2:         rust-pr33798-miniz-misleading-indentation.patch
+
+# merged for 1.11.0: https://github.com/rust-lang/hoedown/pull/6
+# via https://github.com/rust-lang/rust/pull/33988
+# (but eventually we should ditch this bundled hoedown)
+Patch3:         rust-hoedown-pr6-misleading-indentation.patch
+
 BuildRequires:  make
 BuildRequires:  cmake
 BuildRequires:  gcc
@@ -77,6 +85,8 @@ documentation.
 %setup -q -n %{rustc_package}
 
 %patch1 -p1 -b .rebuild
+%patch2 -p1 -b .miniz-indent
+%patch3 -p1 -d src/rt/hoedown/ -b .hoedown-indent
 
 # unbundle
 rm -rf src/llvm/ src/jemalloc/

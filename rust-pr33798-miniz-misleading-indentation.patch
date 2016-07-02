@@ -1,0 +1,58 @@
+commit 7bddce693cec4ae4eb6970ed91289815b316cff3 (from 17b6261cc41343b1f2b611ca12f1ccd2d4306ee5)
+Merge: 17b6261cc413 6e9774f4bb70
+Author: bors <bors@rust-lang.org>
+Date:   Fri May 27 14:49:10 2016 -0700
+
+    Auto merge of #33798 - locallycompact:lc/misleading-intentation, r=alexcrichton
+    
+    Fix misleading intentation errors on gcc 6.0
+    
+    Currently building with latest gcc results in the following error:
+    
+        compile: x86_64-unknown-linux-gnu/rt/miniz.o
+        /home/lc/rust/src/rt/miniz.c: In function ‘tinfl_decompress’:
+        /home/lc/rust/src/rt/miniz.c:578:9: error: this ‘for’ clause does not guard... [-Werror=misleading-indentation]
+                 for ( i = 0; i <= 143; ++i) *p++ = 8; for ( ; i <= 255; ++i) *p++ = 9; for ( ; i <= 279; ++i) *p++ = 7; for ( ; i <= 287; ++i) *p++ = 8;
+                 ^~~
+        /home/lc/rust/src/rt/miniz.c:578:47: note: ...this statement, but the latter is misleadingly indented as if it is guarded by the ‘for’
+                 for ( i = 0; i <= 143; ++i) *p++ = 8; for ( ; i <= 255; ++i) *p++ = 9; for ( ; i <= 279; ++i) *p++ = 7; for ( ; i <= 287; ++i) *p++ = 8;
+                                                       ^~~
+        /home/lc/rust/src/rt/miniz.c: In function ‘tdefl_find_match’:
+        /home/lc/rust/src/rt/miniz.c:1396:5: error: this ‘if’ clause does not guard... [-Werror=misleading-indentation]
+             if (!dist) break; p = s; q = d->m_dict + probe_pos; for (probe_len = 0; probe_len < max_match_len; probe_len++) if (*p++ != *q++) break;
+             ^~
+        /home/lc/rust/src/rt/miniz.c:1396:23: note: ...this statement, but the latter is misleadingly indented as if it is guarded by the ‘if’
+             if (!dist) break; p = s; q = d->m_dict + probe_pos; for (probe_len = 0; probe_len < max_match_len; probe_len++) if (*p++ != *q++) break;
+                               ^
+    
+    This patch stops this.
+
+diff --git a/src/rt/miniz.c b/src/rt/miniz.c
+index 2b803b06d099..2daca9378a4a 100644
+--- a/src/rt/miniz.c
++++ b/src/rt/miniz.c
+@@ -575,7 +575,10 @@ tinfl_status tinfl_decompress(tinfl_decompressor *r, const mz_uint8 *pIn_buf_nex
+       {
+         mz_uint8 *p = r->m_tables[0].m_code_size; mz_uint i;
+         r->m_table_sizes[0] = 288; r->m_table_sizes[1] = 32; TINFL_MEMSET(r->m_tables[1].m_code_size, 5, 32);
+-        for ( i = 0; i <= 143; ++i) *p++ = 8; for ( ; i <= 255; ++i) *p++ = 9; for ( ; i <= 279; ++i) *p++ = 7; for ( ; i <= 287; ++i) *p++ = 8;
++        for ( i = 0; i <= 143; ++i) *p++ = 8;
++        for ( ; i <= 255; ++i) *p++ = 9;
++        for ( ; i <= 279; ++i) *p++ = 7;
++        for ( ; i <= 287; ++i) *p++ = 8;
+       }
+       else
+       {
+@@ -1393,7 +1396,10 @@ static MZ_FORCEINLINE void tdefl_find_match(tdefl_compressor *d, mz_uint lookahe
+         if ((d->m_dict[probe_pos + match_len] == c0) && (d->m_dict[probe_pos + match_len - 1] == c1)) break;
+       TDEFL_PROBE; TDEFL_PROBE; TDEFL_PROBE;
+     }
+-    if (!dist) break; p = s; q = d->m_dict + probe_pos; for (probe_len = 0; probe_len < max_match_len; probe_len++) if (*p++ != *q++) break;
++    if (!dist) break;
++    p = s; q = d->m_dict + probe_pos;
++    for (probe_len = 0; probe_len < max_match_len; probe_len++)
++        if (*p++ != *q++) break;
+     if (probe_len > match_len)
+     {
+       *pMatch_dist = dist; if ((*pMatch_len = match_len = probe_len) == max_match_len) return;
+

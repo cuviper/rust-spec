@@ -1,0 +1,30 @@
+commit a3736a0a1907cbc8bf619708738815a5fd789c80 (from 4638c60dedfa581fd5fa7c6420d8f32274c9ca0b)
+Merge: 4638c60dedfa 2c3e600653f4
+Author: Alex Crichton <alex@alexcrichton.com>
+Date:   Tue May 31 10:51:47 2016 -0700
+
+    Merge pull request #6 from intelfx/patch-1
+    
+    document.c: fix trigger of -Werror=misleading-indentation
+
+diff --git a/src/document.c b/src/document.c
+index e2731dab41a2..8cd7315b418c 100644
+--- a/src/document.c
++++ b/src/document.c
+@@ -1154,13 +1154,13 @@ char_link(hoedown_buffer *ob, hoedown_document *doc, uint8_t *data, size_t offse
+ 		while (i < size) {
+ 			if (data[i] == '\\') i += 2;
+ 			else if (data[i] == '(' && i != 0) {
+-				nb_p++; i++;
++				nb_p++;
+ 			}
+ 			else if (data[i] == ')') {
+ 				if (nb_p == 0) break;
+-				else nb_p--; i++;
++				else nb_p--;
+ 			} else if (i >= 1 && _isspace(data[i-1]) && (data[i] == '\'' || data[i] == '"')) break;
+-			else i++;
++			i++;
+ 		}
+ 
+ 		if (i >= size) goto cleanup;
