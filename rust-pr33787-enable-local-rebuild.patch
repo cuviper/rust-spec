@@ -1,0 +1,134 @@
+commit dd6e8d45e183861d44ed91a99f0a50403b2776a3 (from 57ef015132ec09345b88d2ec20a9d9809b5d3dfc)
+Merge: 57ef015132ec 0ca7d3dc1ffd
+Author: bors <bors@rust-lang.org>
+Date:   Mon May 23 20:02:23 2016 -0700
+
+    Auto merge of #33787 - cuviper:local-rebuild, r=alexcrichton
+    
+    Add --enable-local-rebuild to bootstrap from the current release
+    
+    In Linux distributions, it is often necessary to rebuild packages for cases like applying new patches or linking against new system libraries.  In this scenario, the rustc in the distro build environment may already match the current release that we're trying to rebuild.  Thus we don't want to use the prior release's bootstrap key, nor `--cfg stage0` for the prior unstable features.
+    
+    The new `configure --enable-local-rebuild` option specifies that we are rebuilding from the current release.  The current bootstrap key is used for the local rustc, and current stage1 features are also assumed.  Both the makefiles and rustbuild support this configuration.
+    
+    Fixes #29556
+    r? @alexcrichton
+
+diff --git a/configure b/configure
+index 38f3e3b00c6d..b7053c5c54f5 100755
+--- a/configure
++++ b/configure
+@@ -599,6 +599,7 @@ opt debug-assertions 0 "build with debugging assertions"
+ opt fast-make 0 "use .gitmodules as timestamp for submodule deps"
+ opt ccache 0 "invoke gcc/clang via ccache to reuse object files between builds"
+ opt local-rust 0 "use an installed rustc rather than downloading a snapshot"
++opt local-rebuild 0 "use an installed rustc matching the current version, for rebuilds"
+ opt llvm-static-stdcpp 0 "statically link to libstdc++ for LLVM"
+ opt rpath 1 "build rpaths into rustc itself"
+ opt stage0-landing-pads 1 "enable landing pads during bootstrap with stage0"
+@@ -847,6 +848,16 @@ then
+     BIN_SUF=.exe
+ fi
+ 
++# --enable-local-rebuild implies --enable-local-rust too
++if [ -n "$CFG_ENABLE_LOCAL_REBUILD" ]
++then
++    if [ -z "$CFG_ENABLE_LOCAL_RUST" ]
++    then
++        CFG_ENABLE_LOCAL_RUST=1
++        putvar CFG_ENABLE_LOCAL_RUST
++    fi
++fi
++
+ if [ -n "$CFG_ENABLE_LOCAL_RUST" ]
+ then
+     system_rustc=$(which rustc)
+diff --git a/mk/main.mk b/mk/main.mk
+index 493b61051331..6feb53ec7b17 100644
+--- a/mk/main.mk
++++ b/mk/main.mk
+@@ -34,7 +34,14 @@ CFG_FILENAME_EXTRA=$(shell printf '%s' $(CFG_RELEASE)$(CFG_EXTRA_FILENAME) | $(C
+ # intentionally not "secure" by any definition, this is largely just a deterrent
+ # from users enabling unstable features on the stable compiler.
+ CFG_BOOTSTRAP_KEY=$(CFG_FILENAME_EXTRA)
++
++# The stage0 compiler needs to use the previous key recorded in src/stage0.txt,
++# except for local-rebuild when it just uses the same current key.
++ifdef CFG_ENABLE_LOCAL_REBUILD
++CFG_BOOTSTRAP_KEY_STAGE0=$(CFG_BOOTSTRAP_KEY)
++else
+ CFG_BOOTSTRAP_KEY_STAGE0=$(shell grep 'rustc_key' $(S)src/stage0.txt | sed 's/rustc_key: '//)
++endif
+ 
+ ifeq ($(CFG_RELEASE_CHANNEL),stable)
+ # This is the normal semver version string, e.g. "0.12.0", "0.12.0-nightly"
+@@ -526,6 +533,11 @@ ifneq ($(strip $(CFG_BUILD)),$(strip $(3)))
+ CFGFLAG$(1)_T_$(2)_H_$(3) = stage1
+ 
+ RPATH_VAR$(1)_T_$(2)_H_$(3) := $$(TARGET_RPATH_VAR1_T_$(2)_H_$$(CFG_BUILD))
++else
++ifdef CFG_ENABLE_LOCAL_REBUILD
++# Assume the local-rebuild rustc already has stage1 features too.
++CFGFLAG$(1)_T_$(2)_H_$(3) = stage1
++endif
+ endif
+ endif
+ 
+diff --git a/src/bootstrap/build/config.rs b/src/bootstrap/build/config.rs
+index 3c35b9a95169..fb1ad12d914f 100644
+--- a/src/bootstrap/build/config.rs
++++ b/src/bootstrap/build/config.rs
+@@ -67,6 +67,7 @@ pub struct Config {
+     pub target: Vec<String>,
+     pub rustc: Option<String>,
+     pub cargo: Option<String>,
++    pub local_rebuild: bool,
+ 
+     // libstd features
+     pub debug_jemalloc: bool,
+@@ -315,6 +316,7 @@ impl Config {
+                 ("RPATH", self.rust_rpath),
+                 ("OPTIMIZE_TESTS", self.rust_optimize_tests),
+                 ("DEBUGINFO_TESTS", self.rust_debuginfo_tests),
++                ("LOCAL_REBUILD", self.local_rebuild),
+             }
+ 
+             match key {
+diff --git a/src/bootstrap/build/mod.rs b/src/bootstrap/build/mod.rs
+index ebc05c5f61c5..21d12d27d92e 100644
+--- a/src/bootstrap/build/mod.rs
++++ b/src/bootstrap/build/mod.rs
+@@ -510,6 +510,14 @@ impl Build {
+              .arg("-j").arg(self.jobs().to_string())
+              .arg("--target").arg(target);
+ 
++        let stage;
++        if compiler.stage == 0 && self.config.local_rebuild {
++            // Assume the local-rebuild rustc already has stage1 features.
++            stage = 1;
++        } else {
++            stage = compiler.stage;
++        }
++
+         // Customize the compiler we're running. Specify the compiler to cargo
+         // as our shim and then pass it some various options used to configure
+         // how the actual compiler itself is called.
+@@ -518,7 +526,7 @@ impl Build {
+         // src/bootstrap/{rustc,rustdoc.rs}
+         cargo.env("RUSTC", self.out.join("bootstrap/debug/rustc"))
+              .env("RUSTC_REAL", self.compiler_path(compiler))
+-             .env("RUSTC_STAGE", compiler.stage.to_string())
++             .env("RUSTC_STAGE", stage.to_string())
+              .env("RUSTC_DEBUGINFO", self.config.rust_debuginfo.to_string())
+              .env("RUSTC_CODEGEN_UNITS",
+                   self.config.rust_codegen_units.to_string())
+@@ -744,7 +752,7 @@ impl Build {
+         // In stage0 we're using a previously released stable compiler, so we
+         // use the stage0 bootstrap key. Otherwise we use our own build's
+         // bootstrap key.
+-        let bootstrap_key = if compiler.is_snapshot(self) {
++        let bootstrap_key = if compiler.is_snapshot(self) && !self.config.local_rebuild {
+             &self.bootstrap_key_stage0
+         } else {
+             &self.bootstrap_key
+

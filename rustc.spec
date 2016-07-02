@@ -1,56 +1,72 @@
-#
-# This is currently not suitable for Fedora, as llvm is compiled with additional patches
-# This is planned to change in future, when the llvm patches are upstreamed
-#
-# Issues
-# - Custom LLVM - use --llvm-root=?
-# - Hardcoded libdir
-# - libuv is included
-#
-# Wiki page: https://github.com/mozilla/rust/wiki/Note-packaging
-#
+# The channel can be stable, beta, or nightly
+%{!?channel: %global channel beta}
 
+# To bootstrap from scratch, set the channel and date from src/stage0.txt
+# e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
+# or nightly wants some beta-YYYY-MM-DD
 %bcond_without bootstrap
-%bcond_with nightly
+%global bootstrap_channel 1.9.0
+%global bootstrap_date 2016-05-24
+
+# Use "rebuild" when building with a distro rustc of the same version.
+# Turn this off when the distro just has the prior release, matching bootstrap.
+%bcond_without rebuild
 
 Name:           rustc
-Version:        1.0.0
-Release:        0.1.beta3%{?dist}
+Version:        1.10.0
+Release:        0.1.beta.3%{?dist}
 Summary:        The Rust Programming Language
-
 License:        ASL 2.0, MIT
-URL:            http://www.rust-lang.org
-%if %with nightly
-Source0:        http://static.rust-lang.org/dist/%{name}-nightly.tar.gz
+URL:            https://www.rust-lang.org
+
+%if "%{channel}" == "stable"
+%global rustc_package %{name}-%{version}
 %else
-Source0:        http://static.rust-lang.org/dist/rustc-%{version}-beta.3-src.tar.gz
+%global rustc_package %{name}-%{channel}
 %endif
+Source0:        https://static.rust-lang.org/dist/%{rustc_package}-src.tar.gz
+
 %if %with bootstrap
-Source1:        http://static.rust-lang.org/stage0-snapshots/rust-stage0-2015-03-27-5520801-linux-x86_64-ef2154372e97a3cb687897d027fd51c8f2c5f349.tar.bz2
-#Source2:        http://static.rust-lang.org/stage0-snapshots/rust-stage0-2014-03-28-b8601a3-linux-i386-3bef5684fd0582fbd4ddebd4514182d4f72924f7.tar.bz2
+%define bootstrap_base https://static.rust-lang.org/dist/%{bootstrap_date}/%{name}-%{bootstrap_channel}
+Source1:        %{bootstrap_base}-x86_64-unknown-linux-gnu.tar.gz
+Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
+#Source3:        %{bootstrap_base}-armv7-unknown-linux-gnueabihf.tar.gz
+#Source4:        %{bootstrap_base}-aarch64-unknown-linux-gnu.tar.gz
 %endif
+
+# merged for 1.11.0: https://github.com/rust-lang/rust/pull/33787
+Patch1:         rust-pr33787-enable-local-rebuild.patch
 
 BuildRequires:  make
-BuildRequires:  llvm-devel
-BuildRequires:  clang-devel
+BuildRequires:  cmake
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
+BuildRequires:  llvm-devel
+BuildRequires:  zlib-devel
 BuildRequires:  python
-BuildRequires:  perl
 BuildRequires:  curl
-#BuildRequires:  pandoc
-BuildRequires:  chrpath
-BuildRequires:  git
+
 %if %without bootstrap
-BuildRequires:  rust
+%if %with rebuild
+BuildRequires:  %{name} >= %{version}
+%else
+BuildRequires:  %{name} < %{version}
+BuildRequires:  %{name} >= %{bootstrap_channel}
 %endif
+%endif
+
+# make check: src/test/run-pass/wait-forked-but-failed-child.rs
+BuildRequires:  /usr/bin/ps
 
 # LLVM features are only present in x86
 ExclusiveArch:      x86_64 i686
 
-%filter_from_requires /%{_target_cpu}-unknown-linux-gnu/d
-%filter_requires_in -P bin/(rust|cargo).*
-%filter_setup
+# TODO: declare remaining bundled libraries (and work on unbundling)
+
+# ALL Rust libraries are private, because they don't keep an ABI.
+%global _privatelibs lib.*-[[:xdigit:]]{8}[.]so.*
+%global __provides_exclude ^(%{_privatelibs})$
+%global __requires_exclude ^(%{_privatelibs})$
 
 %description
 This is a compiler for Rust, including standard libraries, tools and
@@ -58,73 +74,79 @@ documentation.
 
 
 %prep
-%if %with nightly
-%setup -q -n %{name}-nightly
-%else
-%setup -q -n rustc-%{version}-beta.3
-%endif
+%setup -q -n %{rustc_package}
+
+%patch1 -p1 -b .rebuild
+
+# unbundle
+rm -rf src/llvm/ src/jemalloc/
+
+sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
+  src/test/compile-fail/allocator-dylib-is-system.rs \
+  src/test/compile-fail/allocator-rust-dylib-is-jemalloc.rs \
+  src/test/run-pass/allocator-default.rs
+
+sed -i.nomips -e '/target=mips/,+1s/^/# unsupported /' \
+  src/test/run-make/atomic-lock-free/Makefile
+
 %if %with bootstrap
 mkdir -p dl/
-cp %{SOURCE1} dl/
+cp -t dl/ %{SOURCE1} %{SOURCE2} # %{SOURCE3} %{SOURCE4}
 %endif
-
-# Prevent custom configure from failing
-sed -i "/^.*is not recog.*/ s/.*/echo configure: Argument \"'\$arg'\" is not recognized and ignored./" configure
 
 
 %build
 %define _triple_override %{_target_cpu}-unknown-linux-gnu
-%configure \
+%configure --disable-option-checking \
   --build=%{_triple_override} --host=%{_triple_override} --target=%{_triple_override} \
-  --llvm-root=/usr \
-%if %with bootstrap
-# nothing
-%else
---enable-local-rust
-%endif
-
-# LD_LIBRARY_PATH is passed to tell the linker were to find the different libraries,
-# this is needed because the rpaths were removed in prep
-make %{?_smp_mflags} \
-    LD_LIBRARY_PATH=%{_target_cpu}-unknown-linux-gnu/stage0/lib/:%{_target_cpu}-unknown-linux-gnu/stage1/lib/:%{_target_cpu}-unknown-linux-gnu/stage2/lib/:%{_target_cpu}-unknown-linux-gnu/stage3/lib/
+  %{!?with_bootstrap:--enable-local-rust %{?with_rebuild:--enable-local-rebuild}} \
+  --llvm-root=/usr --disable-codegen-tests \
+  --disable-jemalloc \
+  --disable-rpath \
+  --enable-debuginfo \
+  --release-channel=%{channel}
+%make_build VERBOSE=1
 
 
 %install
-make install DESTDIR=%{buildroot}
+%make_install VERBOSE=1
 
-#mv %{buildroot}/%{_prefix}/lib %{buildroot}/%{_libdir}
+# Remove installer artifacts (manifests, uninstall scripts, etc.)
+find %{buildroot}/%{_libdir}/rustlib/ -maxdepth 1 -type f -exec rm -v '{}' '+'
 
-# Create ld.so.conf file
-mkdir -p %{buildroot}/%{_sysconfdir}/ld.so.conf.d
-cat <<EOF >/%{buildroot}/%{_sysconfdir}/ld.so.conf.d/rust-%{_target_cpu}.conf
-%{_prefix}/lib/rustc/
-%{_prefix}/lib/rustc/%{_target_cpu}-unknown-linux-gnu/lib/
-EOF
+# Shared libraries should be executable for debuginfo extraction.
+find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
 
-# Remove rpaths
-{ find %{buildroot}/usr/bin -type f ; find %{buildroot} -type f -name \*.so ; } | xargs chrpath --delete
+# FIXME: __os_install_post will strip the rlibs
+# -- should we find a way to preserve debuginfo?
 
-# Remove buildroot from manifest
-sed -i "s#^%{buildroot}##" %{buildroot}/%{_libdir}/rustlib/manifest
+# FIXME: we probably don't want to ship the target shared libraries
+# under rustlib/ for lack of any Rust ABI.
+
 
 %check
-make check
+make check-lite VERBOSE=1
 
 
 %post -p /sbin/ldconfig
+%postun -p /sbin/ldconfig
 
 
 %files
-%doc COPYRIGHT LICENSE-APACHE LICENSE-MIT README.md
-%{_sysconfdir}/ld.so.conf.d/rust-*.conf
+%license COPYRIGHT LICENSE-APACHE LICENSE-MIT
+%doc README.md
+%doc %{_docdir}/rust/
 %{_bindir}/rust*
 %{_libdir}/lib*
-%{_libdir}/rustlib/*
-%{_datadir}/man/*
+%{_libdir}/rustlib/
+%{_datadir}/man/man1/rust*
 
 
 %changelog
-* Thu Jun 03 2014 Fabian Deutsch <fabiand@fedoraproject.org> - 0.11-1
+* Sat Jul 02 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-0.1.beta.3
+- Update to 1.10.0-beta.3 (bootstrapped)
+
+* Tue Jun 03 2014 Fabian Deutsch <fabiand@fedoraproject.org> - 0.11-1
 - Update to 0.11
 - Add support for nightly builds
 
