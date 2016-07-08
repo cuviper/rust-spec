@@ -1,5 +1,5 @@
 # The channel can be stable, beta, or nightly
-%{!?channel: %global channel beta}
+%{!?channel: %global channel stable}
 
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
@@ -9,29 +9,37 @@
 %global bootstrap_date 2016-05-24
 
 # Use "rebuild" when building with a distro rustc of the same version.
-# Turn this off when the distro just has the prior release, matching bootstrap.
+# Turn this off when the distro has the prior release, matching bootstrap.
 %bcond_without rebuild
 
-Name:           rustc
+Name:           rust
 Version:        1.10.0
-Release:        0.1.beta.3%{?dist}
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
-License:        ASL 2.0, MIT
+License:        ASL 2.0 or MIT
 URL:            https://www.rust-lang.org
 
 %if "%{channel}" == "stable"
-%global rustc_package %{name}-%{version}
+%global rustc_package rustc-%{version}
 %else
-%global rustc_package %{name}-%{channel}
+%global rustc_package rustc-%{channel}
 %endif
 Source0:        https://static.rust-lang.org/dist/%{rustc_package}-src.tar.gz
 
 %if %with bootstrap
-%define bootstrap_base https://static.rust-lang.org/dist/%{bootstrap_date}/%{name}-%{bootstrap_channel}
+%define bootstrap_base https://static.rust-lang.org/dist/%{bootstrap_date}/rustc-%{bootstrap_channel}
 Source1:        %{bootstrap_base}-x86_64-unknown-linux-gnu.tar.gz
 Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
 #Source3:        %{bootstrap_base}-armv7-unknown-linux-gnueabihf.tar.gz
 #Source4:        %{bootstrap_base}-aarch64-unknown-linux-gnu.tar.gz
+%endif
+
+ExclusiveArch:  x86_64 i686
+#ExclusiveArch:  x86_64 i686 armv7hl aarch64
+%ifarch armv7hl
+%global rust_triple armv7-unknown-linux-gnueabihf
+%else
+%define rust_triple %{_target_cpu}-unknown-linux-gnu
 %endif
 
 # merged for 1.11.0: https://github.com/rust-lang/rust/pull/33787
@@ -56,6 +64,7 @@ BuildRequires:  curl
 
 %if %without bootstrap
 %if %with rebuild
+BuildRequires:  %{name} < %{version}-%{release}
 BuildRequires:  %{name} >= %{version}
 %else
 BuildRequires:  %{name} < %{version}
@@ -66,10 +75,12 @@ BuildRequires:  %{name} >= %{bootstrap_channel}
 # make check: src/test/run-pass/wait-forked-but-failed-child.rs
 BuildRequires:  /usr/bin/ps
 
-# LLVM features are only present in x86
-ExclusiveArch:      x86_64 i686
-
-# TODO: declare remaining bundled libraries (and work on unbundling)
+# TODO: work on unbundling these!
+Provides:       bundled(compiler-rt) = 3.8
+Provides:       bundled(hoedown) = 3.0.5
+Provides:       bundled(jquery) = 2.1.4
+Provides:       bundled(libbacktrace) = 6.1.0
+Provides:       bundled(miniz) = 1.14
 
 # ALL Rust libraries are private, because they don't keep an ABI.
 %global _privatelibs lib.*-[[:xdigit:]]{8}[.]so.*
@@ -77,8 +88,36 @@ ExclusiveArch:      x86_64 i686
 %global __requires_exclude ^(%{_privatelibs})$
 
 %description
-This is a compiler for Rust, including standard libraries, tools and
-documentation.
+Rust is a systems programming language that runs blazingly fast, prevents
+segfaults, and guarantees thread safety.
+
+This package includes the Rust compiler, standard library, and documentation
+generator.
+
+
+%package gdb
+Summary:        GDB pretty printers for Rust
+#BuildArch:      noarch
+Requires:       %{name} = %{version}-%{release}
+Requires:       gdb
+
+%description gdb
+This package includes the rust-gdb script, which allows easier debugging of Rust
+programs.
+
+
+%package doc
+Summary:        Documentation for Rust
+BuildArch:      noarch
+Requires:       %{name} = %{version}-%{release}
+
+%description doc
+This package includes HTML documentation for the Rust programming language and
+its standard library.
+
+
+# TODO: consider a rust-std package containing .../rustlib/$target
+# This might allow multilib cross-compilation to work naturally.
 
 
 %prep
@@ -91,13 +130,20 @@ documentation.
 # unbundle
 rm -rf src/llvm/ src/jemalloc/
 
+# These tests assume that alloc_jemalloc is present
 sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
   src/test/compile-fail/allocator-dylib-is-system.rs \
   src/test/compile-fail/allocator-rust-dylib-is-jemalloc.rs \
   src/test/run-pass/allocator-default.rs
 
+# Fedora's LLVM doesn't support any mips targets -- see "llc -version"
 sed -i.nomips -e '/target=mips/,+1s/^/# unsupported /' \
   src/test/run-make/atomic-lock-free/Makefile
+
+%if %without bootstrap
+# The hardcoded stage0 "lib" is inappropriate when using Fedora's own rustc
+sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/$$(CFG_LIBDIR_RELATIVE)/' mk/main.mk
+%endif
 
 %if %with bootstrap
 mkdir -p dl/
@@ -106,9 +152,8 @@ cp -t dl/ %{SOURCE1} %{SOURCE2} # %{SOURCE3} %{SOURCE4}
 
 
 %build
-%define _triple_override %{_target_cpu}-unknown-linux-gnu
 %configure --disable-option-checking \
-  --build=%{_triple_override} --host=%{_triple_override} --target=%{_triple_override} \
+  --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
   %{!?with_bootstrap:--enable-local-rust %{?with_rebuild:--enable-local-rebuild}} \
   --llvm-root=/usr --disable-codegen-tests \
   --disable-jemalloc \
@@ -124,14 +169,24 @@ cp -t dl/ %{SOURCE1} %{SOURCE2} # %{SOURCE3} %{SOURCE4}
 # Remove installer artifacts (manifests, uninstall scripts, etc.)
 find %{buildroot}/%{_libdir}/rustlib/ -maxdepth 1 -type f -exec rm -v '{}' '+'
 
-# Shared libraries should be executable for debuginfo extraction.
+# We don't want to ship the target shared libraries for lack of any Rust ABI.
+find %{buildroot}/%{_libdir}/rustlib/ -type f -name '*.so' -exec rm -v '{}' '+'
+
+# The remaining shared libraries should be executable for debuginfo extraction.
 find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
 
 # FIXME: __os_install_post will strip the rlibs
 # -- should we find a way to preserve debuginfo?
 
-# FIXME: we probably don't want to ship the target shared libraries
-# under rustlib/ for lack of any Rust ABI.
+# Remove unwanted documentation files (we already package them)
+rm -f %{buildroot}/%{_docdir}/%{name}/README.md
+rm -f %{buildroot}/%{_docdir}/%{name}/COPYRIGHT
+rm -f %{buildroot}/%{_docdir}/%{name}/LICENSE-APACHE
+rm -f %{buildroot}/%{_docdir}/%{name}/LICENSE-MIT
+
+# Sanitize the HTML documentation
+find %{buildroot}/%{_docdir}/%{name}/html -empty -delete
+find %{buildroot}/%{_docdir}/%{name}/html -type f -exec chmod -v -x '{}' '+'
 
 
 %check
@@ -145,14 +200,31 @@ make check-lite VERBOSE=1
 %files
 %license COPYRIGHT LICENSE-APACHE LICENSE-MIT
 %doc README.md
-%doc %{_docdir}/rust/
-%{_bindir}/rust*
+%{_bindir}/rustc
+%{_bindir}/rustdoc
+%{_mandir}/man1/rustc.1*
+%{_mandir}/man1/rustdoc.1*
 %{_libdir}/lib*
-%{_libdir}/rustlib/
-%{_datadir}/man/man1/rust*
+%dir %{_libdir}/rustlib
+%{_libdir}/rustlib/%{rust_triple}
+
+
+%files gdb
+%{_bindir}/rust-gdb
+%{_libdir}/rustlib/etc
+
+
+%files doc
+%doc %{_docdir}/%{name}/html/
 
 
 %changelog
+* Thu Jul 07 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-1
+- Update to 1.10.0 (bootstrapped)
+- Rename to plain "rust".
+- Declare bundled provides.
+- Incorporate sub-package changes from gmbonnet.
+
 * Sat Jul 02 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-0.1.beta.3
 - Update to 1.10.0-beta.3 (bootstrapped)
 
