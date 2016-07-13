@@ -14,7 +14,7 @@
 
 Name:           rust
 Version:        1.10.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        The Rust Programming Language
 License:        ASL 2.0 or MIT
 URL:            https://www.rust-lang.org
@@ -34,6 +34,8 @@ Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
 #Source4:        %{bootstrap_base}-aarch64-unknown-linux-gnu.tar.gz
 %endif
 
+# Only x86_64 and i686 are Tier 1 platforms at this time.
+# https://doc.rust-lang.org/stable/book/getting-started.html#tier-1
 ExclusiveArch:  x86_64 i686
 #ExclusiveArch:  x86_64 i686 armv7hl aarch64
 %ifarch armv7hl
@@ -82,6 +84,11 @@ Provides:       bundled(jquery) = 2.1.4
 Provides:       bundled(libbacktrace) = 6.1.0
 Provides:       bundled(miniz) = 1.14
 
+# The C compiler is needed at runtime just for linking.  Someday rustc might
+# invoke the linker directly, and then we'll only need binutils.
+# https://github.com/rust-lang/rust/issues/11937
+Requires:       gcc
+
 # ALL Rust libraries are private, because they don't keep an ABI.
 %global _privatelibs lib.*-[[:xdigit:]]{8}[.]so.*
 %global __provides_exclude ^(%{_privatelibs})$
@@ -97,8 +104,7 @@ generator.
 
 %package gdb
 Summary:        GDB pretty printers for Rust
-#BuildArch:      noarch
-Requires:       %{name} = %{version}-%{release}
+BuildArch:      noarch
 Requires:       gdb
 
 %description gdb
@@ -108,8 +114,7 @@ programs.
 
 %package doc
 Summary:        Documentation for Rust
-BuildArch:      noarch
-Requires:       %{name} = %{version}-%{release}
+# Note, while docs are mostly noarch, some things do vary by target_arch.
 
 %description doc
 This package includes HTML documentation for the Rust programming language and
@@ -129,6 +134,10 @@ its standard library.
 
 # unbundle
 rm -rf src/llvm/ src/jemalloc/
+
+# rust-gdb has hardcoded SYSROOT/lib -- let's make it noarch
+sed -i.noarch -e 's#DIRECTORY=".*"#DIRECTORY="%{_datadir}/%{name}/etc"#' \
+  src/etc/rust-gdb
 
 # These tests assume that alloc_jemalloc is present
 sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
@@ -188,6 +197,10 @@ rm -f %{buildroot}/%{_docdir}/%{name}/LICENSE-MIT
 find %{buildroot}/%{_docdir}/%{name}/html -empty -delete
 find %{buildroot}/%{_docdir}/%{name}/html -type f -exec chmod -v -x '{}' '+'
 
+# Move rust-gdb's python scripts so they're noarch
+mkdir -p %{buildroot}/%{_datadir}/%{name}
+mv -v %{buildroot}/%{_libdir}/rustlib/etc %{buildroot}/%{_datadir}/%{name}/
+
 
 %check
 make check-lite VERBOSE=1
@@ -211,7 +224,7 @@ make check-lite VERBOSE=1
 
 %files gdb
 %{_bindir}/rust-gdb
-%{_libdir}/rustlib/etc
+%{_datadir}/%{name}
 
 
 %files doc
@@ -219,6 +232,10 @@ make check-lite VERBOSE=1
 
 
 %changelog
+* Tue Jul 12 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-3
+- Drop noarch from the docs, since they may vary by target_arch.
+- Fixup rust-gdb so it works as noarch.
+
 * Thu Jul 07 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-2
 - Rebuild without bootstrap.
 
