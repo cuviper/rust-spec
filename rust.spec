@@ -4,7 +4,7 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%bcond_with bootstrap
+%bcond_without bootstrap
 %global bootstrap_channel 1.9.0
 %global bootstrap_date 2016-05-24
 
@@ -14,7 +14,7 @@
 
 Name:           rust
 Version:        1.10.0
-Release:        3%{?dist}
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        ASL 2.0 or MIT
 URL:            https://www.rust-lang.org
@@ -232,54 +232,5 @@ make check-lite VERBOSE=1
 
 
 %changelog
-* Tue Jul 12 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-3
-- Drop noarch from the docs, since they may vary by target_arch.
-- Fixup rust-gdb so it works as noarch.
-
-* Thu Jul 07 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-2
-- Rebuild without bootstrap.
-
-* Thu Jul 07 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-1
-- Update to 1.10.0 (bootstrapped)
-- Rename to plain "rust".
-- Declare bundled provides.
-- Incorporate sub-package changes from gmbonnet.
-
-* Sat Jul 02 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-0.1.beta.3
-- Update to 1.10.0-beta.3 (bootstrapped)
-
-* Tue Jun 03 2014 Fabian Deutsch <fabiand@fedoraproject.org> - 0.11-1
-- Update to 0.11
-- Add support for nightly builds
-
-* Wed May 07 2014 Lubomir Rintel <lkundrak@v3.sk> - 0.10-2
-- Use ExclusiveArch to limit supported architectures instead of forcing
-  it with BuildArch
-- Enable i686
-- Add bootstrap sources, so that build won't access Internet
-- Make it possible to build without bootstrapoing with bundled LLVM
-- BuildRequire git
-
-* Fri Apr 25 2014 Fabian Deutsch <fabiand@fedoraproject.org> - 0.10-1
-- Update to 0.10
-
-* Mon Jan 13 2014 Fabian Deutsch <fabiand@fedoraproject.org> - 0.9-1
-- Update to 0.9
-
-* Tue Oct 01 2013 Fabian Deutsch <fabiand@fedoraproject.org> - 0.8-2
-- Rebuild for copr
-
-* Fri Sep 27 2013 Fabian Deutsch <fabiand@fedoraproject.org> - 0.8-1
-- Update to 0.8
-
-* Thu Jul 04 2013 Fabian Deutsch <fabiand@fedoraproject.org> - 0.7-1
-- Update to 0.7
-- Introduce libextra
-
-* Fri Apr 19 2013 Fabian Deutsch <fabiand@fedoraproject.org> - 0.6-2
-- Update to rust-0.6
-- Remove cargo
-- Fix rpath issues differently (chrpath)
-
-* Fri Mar 01 2013 Fabian Deutsch <fabiand@fedoraproject.org> - 0.6-1
-- Initial package
+* Thu Jul 14 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-1
+- Initial package, bootstrapped
