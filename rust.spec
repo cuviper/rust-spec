@@ -14,9 +14,9 @@
 
 Name:           rust
 Version:        1.10.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Rust Programming Language
-License:        ASL 2.0 or MIT
+License:        ASL 2.0 or MIT, and BSD and ISC
 URL:            https://www.rust-lang.org
 
 %if "%{channel}" == "stable"
@@ -27,7 +27,7 @@ URL:            https://www.rust-lang.org
 Source0:        https://static.rust-lang.org/dist/%{rustc_package}-src.tar.gz
 
 %if %with bootstrap
-%define bootstrap_base https://static.rust-lang.org/dist/%{bootstrap_date}/rustc-%{bootstrap_channel}
+%global bootstrap_base https://static.rust-lang.org/dist/%{bootstrap_date}/rustc-%{bootstrap_channel}
 Source1:        %{bootstrap_base}-x86_64-unknown-linux-gnu.tar.gz
 Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
 #Source3:        %{bootstrap_base}-armv7-unknown-linux-gnueabihf.tar.gz
@@ -61,7 +61,7 @@ BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  llvm-devel
 BuildRequires:  zlib-devel
-BuildRequires:  python
+BuildRequires:  python2
 BuildRequires:  curl
 
 %if %without bootstrap
@@ -134,6 +134,11 @@ its standard library.
 
 # unbundle
 rm -rf src/llvm/ src/jemalloc/
+
+# extract bundled licenses for packaging
+cp src/rt/hoedown/LICENSE src/rt/hoedown/LICENSE-hoedown
+sed -e '/*\//q' src/libbacktrace/backtrace.h \
+  >src/libbacktrace/LICENSE-libbacktrace
 
 # rust-gdb has hardcoded SYSROOT/lib -- let's make it noarch
 sed -i.noarch -e 's#DIRECTORY=".*"#DIRECTORY="%{_datadir}/%{name}/etc"#' \
@@ -212,6 +217,8 @@ make check-lite VERBOSE=1
 
 %files
 %license COPYRIGHT LICENSE-APACHE LICENSE-MIT
+%license src/libbacktrace/LICENSE-libbacktrace
+%license src/rt/hoedown/LICENSE-hoedown
 %doc README.md
 %{_bindir}/rustc
 %{_bindir}/rustdoc
@@ -228,9 +235,22 @@ make check-lite VERBOSE=1
 
 
 %files doc
+%dir %{_docdir}/%{name}
+%license %{_docdir}/%{name}/html/FiraSans-LICENSE.txt
+%license %{_docdir}/%{name}/html/Heuristica-LICENSE.txt
+%license %{_docdir}/%{name}/html/LICENSE-APACHE.txt
+%license %{_docdir}/%{name}/html/LICENSE-MIT.txt
+%license %{_docdir}/%{name}/html/SourceCodePro-LICENSE.txt
+%license %{_docdir}/%{name}/html/SourceSerifPro-LICENSE.txt
 %doc %{_docdir}/%{name}/html/
 
 
 %changelog
+* Tue Jul 26 2016 Josh Stone <jistone@redhat.com> - 1.10.0-2
+- Update -doc directory ownership, and mark its licenses.
+- Package and declare licenses for libbacktrace and hoedown.
+- Set bootstrap_base as a global.
+- Explicitly require python2.
+
 * Thu Jul 14 2016 Josh Stone <jistone@fedoraproject.org> - 1.10.0-1
 - Initial package, bootstrapped
